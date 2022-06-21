@@ -23,11 +23,11 @@ DEBUG = False
 
 #[ MQTT Parameters ]
 MQTT_ENABLED = True
-MQTT_BROKER = 'mqtt.localdomain'
+MQTT_BROKER = 'duif.net'
 MQTT_PORT = 1883
 MQTT_CLIENT_UNIQ = 'smartmeter-1'
 MQTT_TOPIC_PREFIX = 'dsmr'
-MQTT_AUTH = True
+MQTT_AUTH = False
 MQTT_USER = 'dsmr' #username
 MQTT_PASS = 'dsmr' # password
 MQTT_QOS = 0
@@ -35,7 +35,7 @@ MQTT_RETAIN = False
 
 #[ Serial parameters ]
 SER = serial.Serial()
-SER.port = "/dev/ttyUSB1"
+SER.port = "/dev/ttyUSB0"
 SER.baudrate = 115200
 SER.bytesize = serial.SEVENBITS
 SER.parity = serial.PARITY_EVEN
@@ -45,7 +45,7 @@ SER.rtscts = 0
 SER.timeout = 20
 
 #[ InfluxDB parameters ]
-INFLUXDB_ENABLED = True
+INFLUXDB_ENABLED = False
 INFLUXDB_HOST = 'influxdb.localdomain'
 INFLUXDB_PORT = 8086
 INFLUXDB_USER = 'dsmr' #username
@@ -79,6 +79,7 @@ def datastripper(line):
         print(line)
     if (not line.startswith("!")) and (not line.startswith("/")) and (not line.startswith("\\")):
         header = re.match(r"\d{0,3}-\d{0,3}:\d{0,3}.\d{0,3}.\d{0,3}", line).group(0)
+        #print(header)
 
         """
         The DSMR version is located in the 1-3:0.2.8 string.
@@ -113,7 +114,14 @@ def datastripper(line):
                 if DEBUG:
                     print("returning %s -> %s" % (dsmr_value[header][1], dsmr_result))
 
-                return [dsmr_value[header][1], dsmr_result]
+                return [dsmr_value[header][1], dsmr_result, header]
+
+            else:
+                print(f'Unknow header: {header}')
+    elif line.startswith("!"):
+        print('END')
+        return ['END']
+
 
 def main():
     """
@@ -145,8 +153,15 @@ def main():
         if MQTT_AUTH:
             mqttc.username_pw_set(MQTT_USER, MQTT_PASS)
 
-        mqttc.connect(MQTT_BROKER, MQTT_PORT, 60)
-        mqttc.loop_start()
+    mqttc.connect(MQTT_BROKER, MQTT_PORT, 60)
+    mqttc.loop_start()
+
+    power_l1 = 0
+    power_l2 = 0
+    power_l3 = 0
+    solar_l2 = 0
+    netto_consumed = 0
+    netto_produced = 0
 
     while True:
         try:
@@ -158,10 +173,61 @@ def main():
 
         # do some actual stuff with the returned (and valid) data
         if data:
+            if data[0] == 'END':
+                total = float(power_l1) + float(power_l2) + float(power_l3)
+                print(f'TOTAL consumed: {int(total*1000)}')
+                power_l1 = 0
+                power_l2 = 0
+                power_l3 = 0
+                mqtt_topic = 'riouw/kwh'
+                mqttc.publish(mqtt_topic, int(total*1000), MQTT_QOS, MQTT_RETAIN)
+                #print("[MQTT  ] Publish (%s) %s to %s..." % ('total', total, mqtt_topic))
+                
+                mqtt_topic = 'riouw/solar_l2'
+                print(f'SOLAR_L2: {int(float(solar_l2)*1000)}')
+                mqttc.publish(mqtt_topic, int(float(solar_l2)*1000), MQTT_QOS, MQTT_RETAIN)
+#                print("[MQTT  ] Publish (%s) %s to %s..." % ('total', solar_l2, mqtt_topic))
+                solar_l1 = 0
+                solar_l2 = 0
+                solar_l3 = 0
+
+                print(f'netto consumed: {netto_consumed}')
+                print(f'netto_produced {netto_produced}')
+                netto = float(netto_consumed) - float(netto_produced)
+                netto_consumed = 0
+                netto_produced = 0
+                print(f'netto: {netto}')
+                mqtt_topic = 'riouw/kwh_netto'
+                mqttc.publish(mqtt_topic, int(netto*1000), MQTT_QOS, MQTT_RETAIN)
+#                print("[MQTT  ] Publish (%s) %s to %s..." % ('netto', netto, mqtt_topic))
+            elif data[2] == "1-0:21.7.0":
+                power_l1 = data[1]
+                print(f'power_l1 {power_l1}')
+            elif data[2] == "1-0:41.7.0":
+                power_l2 = data[1]
+                print(f'power_l2 {power_l2}')
+            elif data[2] == "1-0:61.7.0":
+                power_l3 = data[1]
+                print(f'power_l3 {power_l3}')
+            elif data[2] == "1-0:1.7.0":
+                netto_consumed = data[1]
+            elif data[2] == "1-0:2.7.0":
+                netto_produced = data[1]
+            elif data[2] == "1-0:22.7.0":
+                solar_l1 = data[1]
+                print(f'solar_l1 {solar_l1}')
+            elif data[2] == "1-0:42.7.0":
+                solar_l2 = data[1]
+                print(f'solar_l2 {solar_l2}')
+            elif data[2] == "1-0:62.7.0":
+                solar_l3 = data[1]
+                print(f'solar_l3 {solar_l3}')
+
             if MQTT_ENABLED:
-                mqtt_topic = ("%s/%s" % (MQTT_TOPIC_PREFIX, data[0]))
-                mqttc.publish(mqtt_topic, data[1], MQTT_QOS, MQTT_RETAIN)
-                print("[MQTT  ] Producing (%s) %s to %s..." % (data[0], data[1], mqtt_topic))
+                #mqtt_topic = ("%s/%s" % (MQTT_TOPIC_PREFIX, data[0]))
+                #mqttc.publish(mqtt_topic, data[1], MQTT_QOS, MQTT_RETAIN)
+                #print("[MQTT  ] Publish (%s) %s to %s..." % (data[0], data[1], mqtt_topic))
+                pass
 
             if INFLUXDB_ENABLED:
                 print("[INFLUX] Posting (%s) %s to %s..." % (data[0], data[1], INFLUXDB_DB))
