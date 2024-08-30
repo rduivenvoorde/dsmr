@@ -78,8 +78,14 @@ def datastripper(line):
     if DEBUG:
         print(line)
     if (not line.startswith("!")) and (not line.startswith("/")) and (not line.startswith("\\")):
-        header = re.match(r"\d{0,3}-\d{0,3}:\d{0,3}.\d{0,3}.\d{0,3}", line).group(0)
-        #print(header)
+        headers = re.match(r"\d{0,3}-\d{0,3}:\d{0,3}.\d{0,3}.\d{0,3}", line)
+        if headers:
+            #print(headers)
+            header = re.match(r"\d{0,3}-\d{0,3}:\d{0,3}.\d{0,3}.\d{0,3}", line).group(0)
+        else:
+            print('NO HEADERS? :')
+            print(headers)
+            return 
 
         """
         The DSMR version is located in the 1-3:0.2.8 string.
@@ -162,6 +168,10 @@ def main():
     solar_l2 = 0
     netto_consumed = 0
     netto_produced = 0
+    d_1_0_1_8_2 = None
+    d_1_0_1_8_1 = None
+    d_1_0_2_8_2 = None
+    d_1_0_2_8_1 = None
 
     while True:
         try:
@@ -199,20 +209,32 @@ def main():
                 print(f'netto: {netto}')
                 mqtt_topic = 'riouw/kwh_netto'
                 mqttc.publish(mqtt_topic, int(netto*1000), MQTT_QOS, MQTT_RETAIN)
+
+                if d_1_0_1_8_2 and d_1_0_1_8_1 and d_1_0_2_8_2 and d_1_0_2_8_1:
+                    print(f"levering normaal/hoog tarief = {d_1_0_1_8_2} kWh")
+                    print(f"levering dal/laag tarief     = {d_1_0_1_8_1} kWh")
+                    print(f"terug normaal/hoog tarief    = {d_1_0_2_8_2} kWh")
+                    print(f"terug dal/laag tarief        = {d_1_0_2_8_1} kWh")
+
 #                print("[MQTT  ] Publish (%s) %s to %s..." % ('netto', netto, mqtt_topic))
             elif data[2] == "1-0:21.7.0":
                 power_l1 = data[1]
                 print(f'power_l1 {power_l1}')
+                mqttc.publish('riouw/power_l1', int(float(power_l1)*1000), MQTT_QOS, MQTT_RETAIN)
             elif data[2] == "1-0:41.7.0":
                 power_l2 = data[1]
+                mqttc.publish('riouw/power_l2', int(float(power_l2)*1000), MQTT_QOS, MQTT_RETAIN)
                 print(f'power_l2 {power_l2}')
             elif data[2] == "1-0:61.7.0":
                 power_l3 = data[1]
+                mqttc.publish('riouw/power_l3', int(float(power_l3)*1000), MQTT_QOS, MQTT_RETAIN)
                 print(f'power_l3 {power_l3}')
             elif data[2] == "1-0:1.7.0":
                 netto_consumed = data[1]
+                #print(f'XXXXX netto_consumed {netto_consumed}')
             elif data[2] == "1-0:2.7.0":
                 netto_produced = data[1]
+                #print(f'XXXXX netto_produces {netto_produced}')
             elif data[2] == "1-0:22.7.0":
                 solar_l1 = data[1]
                 print(f'solar_l1 {solar_l1}')
@@ -222,6 +244,33 @@ def main():
             elif data[2] == "1-0:62.7.0":
                 solar_l3 = data[1]
                 print(f'solar_l3 {solar_l3}')
+            elif data[2] == "0-1:24.2.1":
+                gas = data[1]
+                print(f'gas {gas} m3')
+
+            # https://github.com/energietransitie/dsmr-info/blob/main/dsmr-p1-specs.csv
+            # https://www.netbeheernederland.nl/publicatie/dsmr-502-p1-companion-standard
+            elif data[2] == "1-0:1.8.1":
+                # P1 electricity meter reading deliverd to client normal tarriff OBIS code
+                # Meter Reading electricity delivered to client (Tariff 1)
+                d_1_0_1_8_1 = data[1]
+                #print(f"levering dal/laag tarief     = {d_1_0_1_8_1} kWh")
+            elif data[2] == "1-0:1.8.2":
+                # P1 electricity meter reading deliverd to client low tarriff OBIS code
+                # Meter Reading electricity delivered to client (Tariff 2) 
+                d_1_0_1_8_2 = data[1]
+                #print(f"levering normaal/hoog tarief = {d_1_0_1_8_2} kWh")
+            elif data[2] == "1-0:2.8.1":
+                # P1 electricity meter reading deliverd by client normal tarriff OBIS code
+                # Meter Reading electricity delivered by client (Tariff 1) 
+                d_1_0_2_8_1 = data[1]
+                #print(f"terug dal/laag tarief        = {d_1_0_2_8_1} kWh")
+            elif data[2] == "1-0:2.8.2":
+                # P1 electricity meter reading deliverd by client low tarriff OBIS code
+                # Meter Reading electricity delivered by client (Tariff 2) 
+                d_1_0_2_8_2 = data[1]
+                #print(f"terug normaal/hoog tarief    = {d_1_0_2_8_2} kWh")
+                
 
             if MQTT_ENABLED:
                 #mqtt_topic = ("%s/%s" % (MQTT_TOPIC_PREFIX, data[0]))
